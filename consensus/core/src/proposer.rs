@@ -12,8 +12,8 @@ use tracing::{debug, info, trace};
 use crate::{
     ancestor::{AncestorState, AncestorStateManager},
     block::{
-        Block, BlockAPI, BlockV1, BlockV2, ExtendedBlock, GENESIS_ROUND, SignedBlock, Slot,
-        VerifiedBlock,
+        Block, BlockAPI, BlockV1, BlockV2, BlockV3, ExtendedBlock, GENESIS_ROUND, SignedBlock,
+        Slot, VerifiedBlock,
     },
     context::Context,
     dag_state::DagState,
@@ -540,7 +540,21 @@ impl Proposer for ValidatorProposer {
         };
 
         // Create the block.
-        let block = if self.context.protocol_config.transaction_voting_enabled() {
+        let block = if self.context.protocol_config.enable_v3() {
+            let gc_round = self.dag_state.read().gc_round();
+            Block::V3(BlockV3::new(
+                self.context.committee.epoch(),
+                clock_round,
+                self.context.own_index,
+                now,
+                ancestors.iter().map(|b| b.reference()).collect(),
+                transactions,
+                commit_votes,
+                transaction_votes,
+                vec![],
+                gc_round,
+            ))
+        } else if self.context.protocol_config.transaction_voting_enabled() {
             Block::V2(BlockV2::new(
                 self.context.committee.epoch(),
                 clock_round,

@@ -485,6 +485,25 @@ impl DagState {
         blocks
     }
 
+    /// Gets block infos available in the same slot.
+    /// Must be called on slots above gc_round, otherwise the result may be misleading due to GC eviction.
+    pub(crate) fn get_block_info_at_slot(&self, slot: Slot) -> Vec<(BlockRef, BlockInfo)> {
+        assert!(
+            slot.round > self.gc_round(),
+            "get_block_info_at_slot() should only be called for slots above gc_round: slot {}, gc_round {}",
+            slot,
+            self.gc_round()
+        );
+        let mut results = vec![];
+        for (block_ref, block_info) in self.recent_blocks.range((
+            Included(BlockRef::new(slot.round, slot.authority, BlockDigest::MIN)),
+            Included(BlockRef::new(slot.round, slot.authority, BlockDigest::MAX)),
+        )) {
+            results.push((*block_ref, block_info.clone()));
+        }
+        results
+    }
+
     /// Gets all uncommitted blocks in a slot.
     /// Uncommitted blocks must exist in memory, so only in-memory blocks are checked.
     pub(crate) fn get_uncommitted_blocks_at_slot(&self, slot: Slot) -> Vec<VerifiedBlock> {
@@ -936,9 +955,8 @@ impl DagState {
     }
 
     /// Returns the `RoundInfo` for `round`, if retained. `None` if the round has
-    /// been evicted, Gc'ed or has not been reached yet.
-    #[cfg(test)]
-    pub(crate) fn round_info(&self, round: Round) -> Option<&RoundInfo> {
+    /// been evicted (<= gc_round) or has not been reached yet.
+    pub(crate) fn get_round_info(&self, round: Round) -> Option<&RoundInfo> {
         let front_round = self.round_info.front()?.round;
         if round < front_round || round <= self.gc_round() {
             return None;
@@ -1379,19 +1397,21 @@ impl DagState {
     }
 }
 
-struct BlockInfo {
-    block: VerifiedBlock,
+/// Information on a block accepted into the DAG.
+#[derive(Clone)]
+pub(crate) struct BlockInfo {
+    pub(crate) block: VerifiedBlock,
 
     /// Used in computing commits and leader schedule in Mysticeti v3.
     /// Next-round blocks which have this block as an ancestor.
-    children: BTreeSet<BlockRef>,
+    pub(crate) children: BTreeSet<BlockRef>,
     /// Distinct authorities that have authored one of the entries in `children`.
-    children_authorities: BTreeSet<AuthorityIndex>,
+    pub(crate) children_authorities: BTreeSet<AuthorityIndex>,
     /// Sum of stake across `children_authorities`.
-    total_children_stake: Stake,
+    pub(crate) total_children_stake: Stake,
 
     // Whether the block has been committed
-    committed: bool,
+    pub(crate) committed: bool,
     // Whether the block has been included in the causal history of an owned proposed block.
     ///
     /// There are two usages of this field:
@@ -2154,7 +2174,7 @@ mod test {
         let mut dag_state = DagState::new(context.clone(), store.clone());
 
         // Before any blocks: no round_info entries exist.
-        assert!(dag_state.round_info(1).is_none());
+        assert!(dag_state.get_round_info(1).is_none());
 
         // Accept blocks for rounds 1..=4 with full participation. Each round
         // must aggregate every authority and stake equal to total_stake.
@@ -2166,7 +2186,7 @@ mod test {
             (0..4).map(AuthorityIndex::new_for_test).collect();
         for round in 1..=4 {
             let info = dag_state
-                .round_info(round)
+                .get_round_info(round)
                 .unwrap_or_else(|| panic!("round_info missing for round {round}"));
             assert_eq!(info.round, round);
             assert_eq!(
@@ -2181,13 +2201,13 @@ mod test {
         }
 
         // Beyond highest_accepted_round: no entry yet.
-        assert!(dag_state.round_info(5).is_none());
+        assert!(dag_state.get_round_info(5).is_none());
 
         // Re-accepting the same blocks must not double-count stake. The
         // contains_block early-return inside accept_block guards this.
         dag_state.accept_blocks(dag_builder.all_blocks());
         for round in 1..=4 {
-            let info = dag_state.round_info(round).unwrap();
+            let info = dag_state.get_round_info(round).unwrap();
             assert_eq!(
                 info.authorities, all_authorities,
                 "round {round} authorities changed after re-accept"
@@ -2213,7 +2233,7 @@ mod test {
                 .build(),
         );
         dag_state.accept_block(round_5_block);
-        let info_5 = dag_state.round_info(5).expect("round 5 entry should exist");
+        let info_5 = dag_state.get_round_info(5).expect("round 5 entry should exist");
         let author_0 = AuthorityIndex::new_for_test(0);
         assert_eq!(info_5.authorities, BTreeSet::from([author_0]));
         assert_eq!(info_5.total_stake, context.committee.stake(author_0));
@@ -2241,7 +2261,7 @@ mod test {
         // round advances, even before flush physically removes stale entries.
         for round in 1..=2 {
             assert!(
-                dag_state.round_info(round).is_none(),
+                dag_state.get_round_info(round).is_none(),
                 "round {round} should be hidden before flush after GC advances"
             );
         }
@@ -2251,19 +2271,19 @@ mod test {
         // Rounds 1..=2 are evicted; rounds 3..=5 remain with their aggregates.
         for round in 1..=2 {
             assert!(
-                dag_state.round_info(round).is_none(),
+                dag_state.get_round_info(round).is_none(),
                 "round {round} should be evicted after flush"
             );
         }
         for round in 3..=4 {
             let info = dag_state
-                .round_info(round)
+                .get_round_info(round)
                 .unwrap_or_else(|| panic!("round_info missing for round {round} after flush"));
             assert_eq!(info.authorities, all_authorities);
             assert_eq!(info.total_stake, context.committee.total_stake());
         }
         let info_5 = dag_state
-            .round_info(5)
+            .get_round_info(5)
             .expect("round 5 should still be present after flush");
         assert_eq!(info_5.authorities, BTreeSet::from([author_0]));
         assert_eq!(info_5.total_stake, context.committee.stake(author_0));
