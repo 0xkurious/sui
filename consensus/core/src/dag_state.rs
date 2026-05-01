@@ -2233,7 +2233,9 @@ mod test {
                 .build(),
         );
         dag_state.accept_block(round_5_block);
-        let info_5 = dag_state.get_round_info(5).expect("round 5 entry should exist");
+        let info_5 = dag_state
+            .get_round_info(5)
+            .expect("round 5 entry should exist");
         let author_0 = AuthorityIndex::new_for_test(0);
         assert_eq!(info_5.authorities, BTreeSet::from([author_0]));
         assert_eq!(info_5.total_stake, context.committee.stake(author_0));
