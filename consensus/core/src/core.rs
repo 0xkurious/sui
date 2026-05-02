@@ -978,7 +978,7 @@ impl Core {
                 "Next v3 commit leaders: index={} min_round={} num={} allowed={:?}",
                 next.next_commit_index,
                 next.min_next_leader_round,
-                next.num_leaders,
+                next.num_leaders(),
                 next.allowed_leaders,
             );
             // Push the refreshed schedule into the proposer so its

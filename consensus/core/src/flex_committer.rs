@@ -412,7 +412,7 @@ impl PendingCommitState {
             let mut leaders = self
                 .next_commit_leaders
                 .allowed_leaders
-                .choose_multiple(&mut rng, self.next_commit_leaders.num_leaders)
+                .choose_multiple(&mut rng, self.next_commit_leaders.num_leaders())
                 .cloned()
                 .collect::<Vec<_>>();
             leaders.shuffle(&mut rng);
