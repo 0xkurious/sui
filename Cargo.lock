@@ -16063,6 +16063,7 @@ dependencies = [
  "base64 0.21.7",
  "bcs",
  "bin-version",
+ "bytes",
  "clap",
  "fastcrypto",
  "fastcrypto-zkp",
