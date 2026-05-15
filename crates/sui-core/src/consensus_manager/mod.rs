@@ -12,8 +12,8 @@ use consensus_config::{
     NetworkPublicKey as ConsensusNetworkPublicKey, Parameters, ProtocolKeyPair,
 };
 use consensus_core::{
-    AuxiliaryDataHandler, Clock, CommitConsumerArgs, CommitConsumerMonitor, CommitIndex,
-    ConsensusAuthority, NetworkType,
+    Clock, CommitConsumerArgs, CommitConsumerMonitor, CommitIndex, ConsensusAuthority, NetworkType,
+    RandomnessSignatureHandler,
 };
 use core::panic;
 use fastcrypto::traits::KeyPair as _;
@@ -163,10 +163,6 @@ pub struct ConsensusManager {
     consumer_monitor: ArcSwapOption<CommitConsumerMonitor>,
     consumer_monitor_sender: broadcast::Sender<Arc<CommitConsumerMonitor>>,
 
-    /// Long-lived broadcast sender for randomness signatures, passed into consensus
-    /// so it can push signatures to connected observer peers.
-    signatures_broadcast: broadcast::Sender<bytes::Bytes>,
-
     running: Mutex<Running>,
 
     #[cfg(test)]
@@ -186,7 +182,6 @@ impl ConsensusManager {
         registry_service: &RegistryService,
         consensus_client: Arc<UpdatableConsensusClient>,
         node_role: NodeRole,
-        signatures_broadcast: tokio::sync::broadcast::Sender<bytes::Bytes>,
     ) -> Self {
         let metrics = Arc::new(ConsensusManagerMetrics::new(
             &registry_service.default_registry(),
@@ -214,7 +209,6 @@ impl ConsensusManager {
             running: Mutex::new(Running::False),
             boot_counter: Mutex::new(0),
             address_overrides: parking_lot::Mutex::new(AddressOverridesMap::new()),
-            signatures_broadcast,
         }
     }
 
@@ -224,7 +218,7 @@ impl ConsensusManager {
         epoch_store: Arc<AuthorityPerEpochStore>,
         consensus_handler_initializer: ConsensusHandlerInitializer,
         tx_validator: SuiTxValidator,
-        auxiliary_data_handler: Option<Arc<dyn AuxiliaryDataHandler>>,
+        randomness_signature_handler: Option<Arc<dyn RandomnessSignatureHandler>>,
     ) {
         let system_state = epoch_store.epoch_start_state();
         let committee: Committee = system_state.get_consensus_committee();
@@ -323,8 +317,7 @@ impl ConsensusManager {
             commit_consumer,
             registry.clone(),
             *boot_counter,
-            self.signatures_broadcast.clone(),
-            auxiliary_data_handler,
+            randomness_signature_handler,
         )
         .await;
         let client = authority.transaction_client();
