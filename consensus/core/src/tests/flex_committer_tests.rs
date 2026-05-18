@@ -29,16 +29,12 @@ fn setup(num_authorities: usize) -> (Arc<Context>, Arc<RwLock<DagState>>, FlexCo
     (context, dag_state, committer)
 }
 
-fn next_commit_leader_schedule(
-    num_leaders: usize,
-    allowed: Vec<AuthorityIndex>,
-) -> NextCommitLeaderSchedule {
+fn next_commit_leader_schedule(allowed: Vec<AuthorityIndex>) -> NextCommitLeaderSchedule {
     NextCommitLeaderSchedule {
         // > 0 to force `maybe_refresh_pending_commit_state` to install our
-        // num_leaders / allowed_leaders. The default index is 0.
+        // allowed_leaders. The default index is 0.
         next_commit_index: 1,
         min_next_leader_round: 1,
-        num_leaders,
         allowed_leaders: allowed,
     }
 }
@@ -52,7 +48,7 @@ async fn try_commit_single_leader_committed() {
 
     build_dag(context, dag_state, None, 2);
 
-    let next = next_commit_leader_schedule(1, vec![AuthorityIndex::new_for_test(0)]);
+    let next = next_commit_leader_schedule(vec![AuthorityIndex::new_for_test(0)]);
     let (commit, subdag) = committer
         .try_commit(next)
         .expect("expected a commit when round 1 is fully voted");
@@ -82,7 +78,7 @@ async fn try_commit_single_leader_all_skipped() {
         .collect();
     build_dag(context, dag_state, Some(refs_without_leader), 2);
 
-    let next = next_commit_leader_schedule(1, vec![AuthorityIndex::new_for_test(0)]);
+    let next = next_commit_leader_schedule(vec![AuthorityIndex::new_for_test(0)]);
     assert!(committer.try_commit(next).is_none());
 }
 
@@ -95,7 +91,7 @@ async fn try_commit_single_leader_undecided() {
 
     build_dag(context, dag_state, None, 1);
 
-    let next = next_commit_leader_schedule(1, vec![AuthorityIndex::new_for_test(0)]);
+    let next = next_commit_leader_schedule(vec![AuthorityIndex::new_for_test(0)]);
     assert!(committer.try_commit(next).is_none());
 }
 
@@ -145,7 +141,7 @@ async fn try_commit_does_not_skip_undecided_prefix_round() {
     // Round 3: full layer — the round-2 leader has a quorum of votes.
     build_dag(context.clone(), dag_state, Some(refs_round_2), 3);
 
-    let next = next_commit_leader_schedule(1, vec![leader]);
+    let next = next_commit_leader_schedule(vec![leader]);
     assert!(
         committer.try_commit(next).is_none(),
         "round 2 must not be committed while round 1 remains undecided",
@@ -162,7 +158,7 @@ async fn try_commit_multi_leader_all_committed() {
     build_dag(context, dag_state, None, 2);
 
     let allowed: Vec<_> = (0..4).map(AuthorityIndex::new_for_test).collect();
-    let next = next_commit_leader_schedule(4, allowed);
+    let next = next_commit_leader_schedule(allowed);
     let (commit, subdag) = committer
         .try_commit(next)
         .expect("expected a commit when all leaders fully voted");
@@ -194,7 +190,7 @@ async fn try_commit_multi_leader_some_skipped() {
     build_dag(context, dag_state, Some(refs_without_leader_0), 2);
 
     let allowed: Vec<_> = (0..4).map(AuthorityIndex::new_for_test).collect();
-    let next = next_commit_leader_schedule(4, allowed);
+    let next = next_commit_leader_schedule(allowed);
     let (commit, subdag) = committer
         .try_commit(next)
         .expect("expected a commit — three leaders committed, one skipped");
@@ -244,6 +240,6 @@ async fn try_commit_multi_leader_all_skipped() {
     build_dag_layer(connections, dag_state.clone());
 
     let allowed: Vec<_> = (0..4).map(AuthorityIndex::new_for_test).collect();
-    let next = next_commit_leader_schedule(4, allowed);
+    let next = next_commit_leader_schedule(allowed);
     assert!(committer.try_commit(next).is_none());
 }
