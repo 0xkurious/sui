@@ -7,6 +7,7 @@ mod collect_uses;
 mod flatten_seq;
 mod fuse_let;
 mod hoist_arm_assignments;
+mod inline_single_use_bindings;
 mod introduce_while;
 mod loop_to_seq;
 mod reconstruct_match;
@@ -36,6 +37,7 @@ const REFINEMENTS: &[Refinement] = &[
     simplify_if::refine,
     recover_asserts::refine,
     strip_loop_labels::refine,
+    inline_single_use_bindings::refine,
 ];
 
 // -------------------------------------------------------------------------------------------------
