@@ -58,6 +58,8 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use anyhow::Context as _;
@@ -156,12 +158,23 @@ pub(super) fn checkpoint_field_mask() -> FieldMask {
     ])
 }
 
+/// Bundle of streaming handles registered in the GraphQL context. Wrapping in a nominal type
+/// keeps `Arc<AtomicU64>` and `broadcast::Receiver` from clashing with other context entries
+/// that may be added later.
+pub(crate) struct SubscriptionResources {
+    pub(crate) broadcaster: CheckpointBroadcaster,
+    pub(crate) network_tip: Arc<AtomicU64>,
+    pub(crate) ledger_grpc_reader: LedgerGrpcReader,
+}
+
 /// Background service that connects to a fullnode's gRPC SubscribeCheckpoints endpoint,
 /// processes incoming checkpoints, and broadcasts them to subscription resolvers.
 pub(crate) struct CheckpointStreamTask {
     uri: Uri,
     sender: broadcast::Sender<Arc<ProcessedCheckpoint>>,
     broadcaster: CheckpointBroadcaster,
+    /// Sequence number of the most recent checkpoint this task has broadcast.
+    network_tip: Arc<AtomicU64>,
     streaming_packages: Arc<StreamingPackageStore>,
     package_eviction_tx: UnboundedSender<(u64, Vec<AccountAddress>)>,
     readiness: Arc<SubscriptionReadiness>,
@@ -190,6 +203,7 @@ impl CheckpointStreamTask {
             uri,
             sender,
             broadcaster,
+            network_tip: Arc::new(AtomicU64::new(0)),
             streaming_packages,
             package_eviction_tx,
             readiness,
@@ -199,8 +213,12 @@ impl CheckpointStreamTask {
         }
     }
 
-    pub(crate) fn broadcaster(&self) -> CheckpointBroadcaster {
-        self.broadcaster.resubscribe()
+    pub(crate) fn subscription_resources(&self) -> SubscriptionResources {
+        SubscriptionResources {
+            broadcaster: self.broadcaster.resubscribe(),
+            network_tip: self.network_tip.clone(),
+            ledger_grpc_reader: self.ledger_grpc_reader.clone(),
+        }
     }
 
     /// Connect to the fullnode's gRPC SubscribeCheckpoints endpoint.
@@ -324,6 +342,8 @@ impl CheckpointStreamTask {
             let _ = self.package_eviction_tx.send((seq, ids));
         }
         let processed = process_checkpoint(checkpoint)?;
+        self.network_tip
+            .store(processed.sequence_number, Ordering::Relaxed);
         // Ignore send errors: no active subscribers is a normal state.
         let _ = self.sender.send(Arc::new(processed));
         Ok(())

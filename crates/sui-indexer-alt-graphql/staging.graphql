@@ -4067,11 +4067,13 @@ type StoreExecutionTimeObservationsTransaction {
 
 type Subscription {
 	"""
-	Subscribe to checkpoints as they are finalized, starting from the current tip.
+	Subscribe to checkpoints as they are finalized.
+	
+	Pass `afterCursor` (opaque) or `afterCheckpoint` (sequence number) to resume from a known point. The two arguments are mutually exclusive.
 	
 	This subscription is not yet available for use.
 	"""
-	checkpoints: Checkpoint!
+	checkpoints(afterCursor: String, afterCheckpoint: UInt53): Checkpoint!
 	"""
 	Subscribe to events as they are emitted, with optional filtering.
 	

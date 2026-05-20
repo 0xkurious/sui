@@ -228,6 +228,7 @@ pub struct ZkLoginLayer {
     pub max_epoch_upper_bound_delta: Option<Option<u64>>,
 }
 
+#[derive(Clone)]
 pub struct SubscriptionConfig {
     /// Number of checkpoints the broadcast channel can buffer before slow subscribers are
     /// dropped. Higher values give subscribers more time to catch up but use more memory,
@@ -241,6 +242,19 @@ pub struct SubscriptionConfig {
 
     /// Number of checkpoints fetched concurrently per chunk during upstream gap recovery.
     pub gap_recovery_chunk_size: usize,
+
+    /// Maximum number of checkpoints fetched per LedgerService batch during a resumable
+    /// subscription's catch-up scan.
+    pub resume_batch_size: usize,
+
+    /// Once a resume scan is within this many checkpoints of the live tip, the scan stops
+    /// and the live broadcast takes over.
+    pub resume_transition_threshold: u64,
+
+    /// Maximum consecutive recovery attempts (re-entering the catch-up scan after a Lagged
+    /// event or detecting a gap on the broadcast) before a subscription is disconnected.
+    /// Resets on any successful yield.
+    pub resume_max_recovery_attempts: u32,
 }
 
 impl Default for SubscriptionConfig {
@@ -249,6 +263,9 @@ impl Default for SubscriptionConfig {
             broadcast_buffer: 256,
             package_eviction_interval_ms: 300_000,
             gap_recovery_chunk_size: 50,
+            resume_batch_size: 50,
+            resume_transition_threshold: 50,
+            resume_max_recovery_attempts: 3,
         }
     }
 }
@@ -260,6 +277,9 @@ pub struct SubscriptionLayer {
     pub broadcast_buffer: Option<usize>,
     pub package_eviction_interval_ms: Option<u64>,
     pub gap_recovery_chunk_size: Option<usize>,
+    pub resume_batch_size: Option<usize>,
+    pub resume_transition_threshold: Option<u64>,
+    pub resume_max_recovery_attempts: Option<u32>,
 }
 
 impl SubscriptionLayer {
@@ -272,6 +292,13 @@ impl SubscriptionLayer {
             gap_recovery_chunk_size: self
                 .gap_recovery_chunk_size
                 .unwrap_or(base.gap_recovery_chunk_size),
+            resume_batch_size: self.resume_batch_size.unwrap_or(base.resume_batch_size),
+            resume_transition_threshold: self
+                .resume_transition_threshold
+                .unwrap_or(base.resume_transition_threshold),
+            resume_max_recovery_attempts: self
+                .resume_max_recovery_attempts
+                .unwrap_or(base.resume_max_recovery_attempts),
         }
     }
 }
@@ -546,6 +573,9 @@ impl From<SubscriptionConfig> for SubscriptionLayer {
             broadcast_buffer: Some(value.broadcast_buffer),
             package_eviction_interval_ms: Some(value.package_eviction_interval_ms),
             gap_recovery_chunk_size: Some(value.gap_recovery_chunk_size),
+            resume_batch_size: Some(value.resume_batch_size),
+            resume_transition_threshold: Some(value.resume_transition_threshold),
+            resume_max_recovery_attempts: Some(value.resume_max_recovery_attempts),
         }
     }
 }

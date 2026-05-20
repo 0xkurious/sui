@@ -444,7 +444,10 @@ pub async fn start_rpc(
         readiness,
     )) = streaming_setup
     {
-        rpc = rpc.data(stream_task.broadcaster()).data(streaming_packages);
+        rpc = rpc
+            .data(stream_task.subscription_resources())
+            .data(streaming_packages)
+            .data(config.subscription.clone());
         let s_stream = stream_task.run();
         let s_eviction = eviction_task.run();
         readiness.wait_for_ready().await?;
