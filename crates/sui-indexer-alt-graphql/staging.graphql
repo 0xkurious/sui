@@ -483,6 +483,12 @@ type Checkpoint implements Node {
 	"""
 	contentDigest: String
 	"""
+	Opaque cursor identifying this checkpoint's position.
+	
+	Useful in subscriptions: clients can stash the cursor of each yielded checkpoint and pass it back as `afterCursor` to resume from this point.
+	"""
+	cursor: String!
+	"""
 	A 32-byte hash that uniquely identifies the checkpoint, encoded in Base58. This is a hash of the checkpoint's summary.
 	"""
 	digest: String

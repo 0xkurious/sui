@@ -1,0 +1,26 @@
+---
+source: external-crates/move/crates/move-transactional-test-runner/src/framework.rs
+---
+processed 3 tasks
+
+init:
+A: object(0,0)
+
+task 1, line 6:
+//# create-checkpoint
+Checkpoint created: 1
+
+task 2, lines 8-12:
+//# run-graphql
+Response: {
+  "data": {
+    "c0": {
+      "sequenceNumber": 0,
+      "cursor": "MA=="
+    },
+    "c1": {
+      "sequenceNumber": 1,
+      "cursor": "MQ=="
+    }
+  }
+}

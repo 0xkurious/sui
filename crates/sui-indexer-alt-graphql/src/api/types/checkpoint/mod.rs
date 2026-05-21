@@ -7,6 +7,7 @@ use anyhow::Context as _;
 use async_graphql::Context;
 use async_graphql::Object;
 use async_graphql::connection::Connection;
+use async_graphql::connection::CursorType;
 use sui_indexer_alt_reader::kv_loader::KvLoader;
 use sui_types::crypto::AuthorityStrongQuorumSignInfo;
 use sui_types::message_envelope::Message;
@@ -74,6 +75,13 @@ impl Checkpoint {
     /// The checkpoint's position in the total order of finalized checkpoints, agreed upon by consensus.
     async fn sequence_number(&self) -> UInt53 {
         self.sequence_number.into()
+    }
+
+    /// Opaque cursor identifying this checkpoint's position.
+    ///
+    /// Useful in subscriptions: clients can stash the cursor of each yielded checkpoint and pass it back as `afterCursor` to resume from this point.
+    async fn cursor(&self) -> String {
+        CCheckpoint::new(self.sequence_number).encode_cursor()
     }
 
     /// Query the RPC as if this checkpoint were the latest checkpoint.

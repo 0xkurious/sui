@@ -173,6 +173,9 @@ Checkpoint.id
 Checkpoint.sequenceNumber
   => {}
 
+Checkpoint.cursor
+  => {}
+
 Checkpoint.query
   => {}
 
