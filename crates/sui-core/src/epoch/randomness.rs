@@ -324,6 +324,12 @@ impl RandomnessManager {
             rm.dkg_output
                 .set(Some(dkg_output.clone()))
                 .expect("setting new OnceCell should succeed");
+
+            // Update the randomness round receiver with the public key, so it can now
+            // verify randomness round signatures received out of consensus.
+            rm.randomness_receiver_handle
+                .set_public_key(*dkg_output.vss_pk.c0());
+
             network_handle.update_epoch(
                 committee.epoch(),
                 rm.authority_info.clone(),
@@ -837,11 +843,15 @@ mod tests {
     };
     use consensus_core::BlockStatus;
     use consensus_types::block::BlockRef;
+    use fastcrypto::groups::bls12381;
+    use fastcrypto::serde_helpers::ToFromByteArray;
+    use fastcrypto_tbls::{mocked_dkg, nodes};
     use std::num::NonZeroUsize;
     use sui_protocol_config::ProtocolConfig;
     use sui_protocol_config::{Chain, ProtocolVersion};
     use sui_types::messages_consensus::ConsensusTransactionKind;
     use tokio::sync::mpsc;
+    use typed_store::Map;
 
     #[tokio::test]
     async fn test_dkg_v1() {
@@ -991,6 +1001,125 @@ mod tests {
         for randomness_manager in &randomness_managers {
             assert_eq!(DkgStatus::Successful, randomness_manager.dkg_status());
         }
+    }
+
+    #[tokio::test]
+    async fn test_randomness_manager_crash_recovery_v1() {
+        telemetry_subscribers::init_for_testing();
+
+        let network_config =
+            sui_swarm_config::network_config_builder::ConfigBuilder::new_with_temp_dir()
+                .committee_size(NonZeroUsize::new(4).unwrap())
+                .with_reference_gas_price(500)
+                .build();
+
+        let mut protocol_config =
+            ProtocolConfig::get_for_version(ProtocolVersion::max(), Chain::Unknown);
+        protocol_config.set_random_beacon_dkg_version_for_testing(1);
+
+        let validator = &network_config.validator_configs[0];
+        let state = TestAuthorityBuilder::new()
+            .with_protocol_config(protocol_config.clone())
+            .with_genesis_and_keypair(&network_config.genesis, validator.protocol_key_pair())
+            .build()
+            .await;
+        let epoch_store = state.epoch_store_for_testing();
+
+        let dkg_nodes = nodes::Nodes::new(
+            RandomnessManager::randomness_dkg_info_from_committee(epoch_store.committee())
+                .into_iter()
+                .map(|(id, _, pk, stake)| nodes::Node::<bls12381::G2Element> {
+                    id,
+                    pk,
+                    weight: stake.try_into().unwrap(),
+                })
+                .collect(),
+        )
+        .unwrap();
+        let threshold = epoch_store
+            .committee()
+            .validity_threshold()
+            .try_into()
+            .unwrap();
+        let party_id = epoch_store
+            .committee()
+            .authority_index(&epoch_store.name)
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let expected_dkg_output = mocked_dkg::generate_mocked_output::<
+            bls12381::G2Element,
+            bls12381::G2Element,
+        >(dkg_nodes, threshold, 0, party_id);
+        let expected_dkg_output_bytes =
+            bcs::to_bytes(&expected_dkg_output).expect("DKG output serialization should not fail");
+        let expected_public_key = *expected_dkg_output.vss_pk.c0();
+
+        let tables = epoch_store.tables().unwrap();
+        tables
+            .dkg_output
+            .insert(&SINGLETON_KEY, &expected_dkg_output)
+            .unwrap();
+        tables
+            .randomness_next_round
+            .insert(&SINGLETON_KEY, &RandomnessRound(3))
+            .unwrap();
+        tables
+            .randomness_highest_completed_round
+            .insert(&SINGLETON_KEY, &RandomnessRound(1))
+            .unwrap();
+
+        let consensus_adapter = Arc::new(ConsensusAdapter::new(
+            Arc::new(MockConsensusClient::new()),
+            CheckpointStore::new_for_tests(),
+            epoch_store.name,
+            100_000,
+            100_000,
+            ConsensusAdapterMetrics::new_test(),
+            Arc::new(tokio::sync::Notify::new()),
+        ));
+        let recovered_receiver_handle = RandomnessRoundReceiverHandle::new_for_testing();
+        assert!(recovered_receiver_handle.public_key_for_testing().is_none());
+
+        let recovered_randomness_manager = RandomnessManager::try_new(
+            Arc::downgrade(&epoch_store),
+            Box::new(consensus_adapter.clone()),
+            sui_network::randomness::Handle::new_stub(),
+            validator.protocol_key_pair(),
+            recovered_receiver_handle.clone(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            DkgStatus::Successful,
+            recovered_randomness_manager.dkg_status()
+        );
+        let recovered_dkg_output = recovered_randomness_manager
+            .dkg_output
+            .get()
+            .expect("recovered DKG output should be initialized")
+            .as_ref()
+            .expect("recovered DKG should be successful");
+        assert_eq!(
+            expected_dkg_output_bytes,
+            bcs::to_bytes(recovered_dkg_output).expect("DKG output serialization should not fail")
+        );
+        assert_eq!(
+            RandomnessRound(3),
+            recovered_randomness_manager.next_randomness_round
+        );
+        assert_eq!(
+            Some(RandomnessRound(1)),
+            *recovered_randomness_manager.highest_completed_round.lock()
+        );
+        let recovered_public_key = recovered_receiver_handle
+            .public_key_for_testing()
+            .expect("public key should be restored on recovery");
+        assert_eq!(
+            expected_public_key.to_byte_array(),
+            recovered_public_key.to_byte_array()
+        );
     }
 
     #[tokio::test]
