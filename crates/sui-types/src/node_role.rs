@@ -53,9 +53,9 @@ impl NodeRole {
     pub fn is_validator(&self) -> bool {
         matches!(self, Self::Validator)
     }
-    // --- Capability methods ---
 
-    /// Whether this node participates in the consensus protocol.
+    /// Whether this node runs consensus in proposer or observer mode.
+    /// Notably, consensus handler and its downstream components always run when this is true.
     pub fn runs_consensus(&self) -> bool {
         matches!(
             self,
@@ -63,14 +63,19 @@ impl NodeRole {
         )
     }
 
+    // --- Temporary feature flags ---
+    // The flags below are temporary and may not match the eventual conditions to enable each feature.
+    // They will be removed and the callsites will resolve to one of the three conditions above
+    // once observer mode is fully implemented.
+
     /// Whether this node should create index stores for JSON-RPC and REST API.
     pub fn should_enable_index_processing(&self) -> bool {
         matches!(self, Self::FullNode(_))
     }
 
-    /// Whether this node should process consensus commit output (execute
-    /// transactions, create checkpoints, etc.). Observers stream blocks but
-    /// rely on state-sync for execution, so they skip commit processing.
+    /// Whether this node should process consensus commit output.
+    /// NOTE: observers do not execute transactions from consensus commit for now.
+    /// But they will eventually when the callsites switch to runs_consensus().
     pub fn should_process_consensus_commits(&self) -> bool {
         matches!(self, Self::Validator)
     }
